@@ -19,6 +19,10 @@ TODO:
  * 
 """
 
+f = Figure(figsize=(5,5), dpi=100)
+f.patch.set_facecolor('w')
+ax = f.add_subplot(111)
+
 class LogPlotterApp(tk.Tk):
 
     def __init__(self):
@@ -69,38 +73,41 @@ class StartPage(tk.Frame):
         fileMenu.add_command(label="Exit", command=self.client_exit)
         # view menu
         viewMenu = tk.Menu(menu, tearoff=False)
-        viewMenu.add_command(label="Set background colour")
+        viewMenu.add_command(label="Set background colour", command=self.change_background)
         # view submenu: display log
         logMenu = tk.Menu(viewMenu, tearoff=False)
         for hole in holes:
-            logMenu.add_command(label=hole, command=partial(self.display_log,hole))
+            logMenu.add_command(label=hole, command=partial(self.display_log, hole))
         viewMenu.add_cascade(label="Display Log", menu=logMenu)
         # add submenus to menu bar
         menu.add_cascade(label="File", menu=fileMenu)
         menu.add_cascade(label="View", menu=viewMenu)
         
+        # add canvas
+        self.canvas = FigureCanvasTkAgg(f, self)
+        self.canvas.show()
+        self.canvas.get_tk_widget().pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
         
         
     # menu methods
     def display_log(self, hole):
     
-        print hole
-    
         # step1: get data from db
+        with open('data.json','r') as fp:
+            data = json.load(fp)
+        xs,ys = data.get(hole)
         
         # step2: update graph
-        f = Figure(figsize=(5,5), dpi=100)
-        f.patch.set_facecolor('w')
-        ax = f.add_subplot(111)
-        if hole=='OL-KR1':
-            ax.plot([1,2,3,4,5,6],[5,4,9,3,2,7])
-        elif hole=='OL-KR2':
-            ax.plot([1,2,3,4,5,6],[2,6,9,9,1,4])
-        else:
-            ax.plot([1,2,3,4,5,6],[7,6,2,5,1,8])
-        canvas = FigureCanvasTkAgg(f, self)
-        canvas.show()
-        canvas.get_tk_widget().pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
+        # f = Figure(figsize=(5,5), dpi=100)
+        # f.patch.set_facecolor('w')
+        # ax = f.add_subplot(111)
+        
+        ax.cla()
+        ax.plot(xs,ys,'r')
+        self.canvas.draw()
+        
+    def change_background(self):
+        
         
     def client_exit(self):
         exit()
