@@ -15,20 +15,23 @@ from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg,
 from functools import partial
 import time
 import json # temporary, in place of db
+import pandas as pd
+import numpy as np
 
 style.use('bmh')
 
 """
 TODO:
  * MVC design pattern!
- * Use matplotlib's 'set_data' method to update graph?
+ * Separate menu from viewpage (i.e. own class)
+ * Possibly also separate figure from viewpage (make it more modular)
+ * Use matplotlib's 'set_data' method to update graph (i.e. instead of cla(), draw())?
  * Improve save_as_image method (filename list, etc...) - see https://tkinter.unpythonic.net/wiki/tkFileDialog
  * Add live-updating statusbar
+ * Add scrollbar (when figure properly implemented)
+ * Add key on second page (linked to figure properties)
+ * Implement application-level logging (using logging)
 """
-
-f = Figure(figsize=(5,5), dpi=100)
-f.patch.set_facecolor('w')
-ax = f.add_subplot(111)
 
 class LogPlotterApp(tk.Tk):
 
@@ -40,13 +43,16 @@ class LogPlotterApp(tk.Tk):
         
         tk.Tk.__init__(self)
         
+        # set up model
+        self.model = Model()
+        
         # set up container frame
         container = tk.Frame(self)
         container.pack(side="top", fill="both", expand=True)
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
         
-        # store page classes in dict
+        # store view classes in dict
         self.frames = {}
         for F in [ViewPage]:
             frame = F(container, self)
@@ -56,11 +62,12 @@ class LogPlotterApp(tk.Tk):
         # (default) show ViewPage
         self.show_frame(ViewPage)
         
-    def show_frame(self, cont):
+        
+    def show_frame(self, frm):
     
         '''Raise page'''
         
-        frame = self.frames[cont]
+        frame = self.frames[frm]
         frame.tkraise()
         
     def exit(self):
@@ -84,9 +91,8 @@ class ViewPage(tk.Frame):
         self.master.title("Logplotter")
         self.pack(fill="both", expand=1)
         
-        # load list of holes
-        with open('holes.json','r') as fp:
-            holes = json.load(fp)
+        # load boreholes from model (breaks design pattern slightly?)
+        holes = self.master.model.bhs
         
         # add a menu bar
         menu = tk.Menu(self.master)
@@ -108,8 +114,13 @@ class ViewPage(tk.Frame):
         menu.add_cascade(label="File", menu=fileMenu)
         menu.add_cascade(label="View", menu=viewMenu)
         
-        # add canvas
-        self.canvas = FigureCanvasTkAgg(f, self)
+        # set up figure & canvas
+        self.fig = Figure(figsize=(5,5), dpi=100)
+        self.fig.patch.set_facecolor('w')
+        self.ax = self.fig.add_subplot(111)
+        # self.line1 = a line (for e.g. change colour access)
+        # self.line2 = another line
+        self.canvas = FigureCanvasTkAgg(self.fig, self)
         self.canvas.show()
         self.canvas.get_tk_widget().pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
         
@@ -119,25 +130,22 @@ class ViewPage(tk.Frame):
         
         savename = asksaveasfilename(defaultextension='.png')
         if savename:
-            f.savefig(savename, dpi=150)
+            self.fig.savefig(savename, dpi=150)
         
     def display_log(self, hole):
     
         '''Select log to display'''
         
-        # display load screen
-        # w = self.canvas.create_text(text="Loading...", font=("Helvetica", 16))
-        # time.sleep(2)
-    
-        # step1: get data from db
-        with open('data.json','r') as fp:
-            data = json.load(fp)
-        xs,ys = data.get(hole)
-        # w.delete()
+        # display temporary load screen ?????
         
-        #line1.set_data(xs,ys)
-        ax.clear()
-        ax.plot(xs,ys,'r')
+        # get data df
+        df = self.master.model.fetch_data(hole)
+        if not df.empty:
+            xs,ys = df.x.values, df.y.values
+
+        # redraw
+        self.ax.clear()
+        self.ax.plot(xs,ys,'r')
         self.canvas.draw()
         
     def change_background(self):
@@ -145,8 +153,12 @@ class ViewPage(tk.Frame):
         '''Change figure background'''
         
         color = askcolor(initialcolor="#ffffff", title="Choose background colour")
-        f.patch.set_facecolor(color[1])
+        self.fig.patch.set_facecolor(color[1])
         self.canvas.draw()
+        
+        
+class Menu(tk.Frame):
+    pass
         
 
 class Model(object):
@@ -154,8 +166,20 @@ class Model(object):
     '''Model class'''
     
     def __init__(self):
-        pass
-    
+        '''initialiser'''
+        self.bhs = json.load(open('holes.json','r'))
+        self.data = pd.DataFrame(columns=['x','y'])
+        
+    def fetch_data(self, bh):
+        '''fetch data from "database"'''
+        try:
+            df = pd.read_json('./db/{}.json'.format(bh), orient='columns')
+        except ValueError:
+            print 'Data could not be loaded from db'
+        else:
+            self.data.x = df.x.values
+            self.data.y = df.y.values
+            return self.data
         
         
 # main loop
