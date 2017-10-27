@@ -1,3 +1,3 @@
 # logplotter
 
-Playing around with GUIs in Tkinter
+Playing around with tkinter and OOP concepts in Python.
