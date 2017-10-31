@@ -20,13 +20,12 @@ style.use('bmh')
 
 """
 TODO:
- * Maintain MVC design pattern!
- * Separate Menu class from ViewPage (make parent ViewPage).
+ * Maintain MVC design pattern
  * Use matplotlib's 'set_data' method to update graph (i.e. instead of cla(), draw())?
- * Improve save_as_image method, see https://tkinter.unpythonic.net/wiki/tkFileDialog
- * Use caching to store recently-loaded logs (avoid excessive db fetches).
- * Add scrollbar (when figure properly implemented)
- * Add legend on second page (linked to figure properties)
+ * Fix save_as_image method, see https://tkinter.unpythonic.net/wiki/tkFileDialog
+ * Use caching to store recently-loaded logs (to avoid excessive db fetches).
+ * Add scrollbar
+ * Add legend on second page (linked to figure properties, which should be part of model?)
  * Implement application-level logging (using logging)
 """
 
@@ -101,34 +100,9 @@ class ViewPage(tk.Frame):
             self.visible[i] = tk.BooleanVar()
             self.visible[i].set(True)
 
-        # load boreholes from model (breaks design pattern slightly?)
-        holes = self.master.model.bhs
-
-        # add a menu bar
-        menu = tk.Menu(self.master)
+        # add a MenuBar
+        menu = MenuBar(self)
         self.master.config(menu=menu)
-        # file menu
-        fileMenu = tk.Menu(menu, tearoff=False)
-        fileMenu.add_command(label="Save as image", command=self.save_as_image)
-        fileMenu.add_separator()
-        fileMenu.add_command(label="Exit", command=controller._exit)
-        # view menu
-        viewMenu = tk.Menu(menu, tearoff=False)
-        viewMenu.add_command(label="Set background colour", command=self.change_background)
-        # view submenu: display borehole data
-        logMenu = tk.Menu(viewMenu, tearoff=False)
-        for hole in holes:
-            logMenu.add_command(label=hole, command=partial(self.display_log, hole))
-        viewMenu.add_cascade(label="Display Log", menu=logMenu)
-        # view submenu: display panels
-        panelMenu = tk.Menu(viewMenu, tearoff=False)
-        for i in xrange(3):
-            panelMenu.add_checkbutton(label='Log {}'.format(i), onvalue=True, offvalue=False,
-                                      variable=self.visible[i], command=partial(self.toggle_panel, i))
-        viewMenu.add_cascade(label='Toggle Panels', menu=panelMenu)
-        # add submenus to menu bar
-        menu.add_cascade(label="File", menu=fileMenu)
-        menu.add_cascade(label="View", menu=viewMenu)
 
         # set up log panels
         self.c1 = LogPanel(self)
@@ -165,7 +139,7 @@ class ViewPage(tk.Frame):
 
         '''Select log to display'''
 
-        # get data df
+        # get data dataFrame
         df = self.master.model.fetch_data(hole)
         if not df.empty:
             xs,ys = df.x.values, df.y.values
@@ -203,9 +177,42 @@ class ViewPage(tk.Frame):
             self.depthVar.set('mD: {:.2f} m'.format(event.ydata))
 
 
-class Menu(tk.Frame):
+class MenuBar(tk.Menu):
 
-    pass
+    '''Menu bar class (for better modularisation)'''
+
+    def __init__(self, parent):
+    
+        '''Initialiser'''
+
+        tk.Menu.__init__(self, parent)
+
+        # file menu
+        fileMenu = tk.Menu(self, tearoff=False)
+        fileMenu.add_command(label="Save as image", command=parent.save_as_image)
+        fileMenu.add_separator()
+        fileMenu.add_command(label="Exit", command=parent.master._exit)
+
+        # view menu
+        viewMenu = tk.Menu(self, tearoff=False)
+        viewMenu.add_command(label="Set background colour", command=parent.change_background)
+
+        # view submenu: display borehole data
+        logMenu = tk.Menu(viewMenu, tearoff=False)
+        for hole in parent.master.model.bhs:
+            logMenu.add_command(label=hole, command=partial(parent.display_log, hole))
+        viewMenu.add_cascade(label="Display Log", menu=logMenu)
+
+        # view submenu: display panels
+        panelMenu = tk.Menu(viewMenu, tearoff=False)
+        for i in xrange(3):
+            panelMenu.add_checkbutton(label='Log {}'.format(i), onvalue=True, offvalue=False,
+                                      variable=parent.visible[i], command=partial(parent.toggle_panel, i))
+        viewMenu.add_cascade(label='Toggle Panels', menu=panelMenu)
+
+        # add menus to menu bar
+        self.add_cascade(label="File", menu=fileMenu)
+        self.add_cascade(label="View", menu=viewMenu)
 
 
 class LogPanel(FigureCanvasTkAgg):
@@ -275,7 +282,7 @@ class Model(object):
             return self.data
 
 
-# main loop
+# main
 if __name__ == '__main__':
 
     root = LogPlotterApp()
