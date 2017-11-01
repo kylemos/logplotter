@@ -13,8 +13,9 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from functools import partial
-import json # temporary in place of db
+# import json # temporary in place of db
 import pandas as pd
+from logplotter_sql import dbConnect
 
 style.use('bmh')
 
@@ -140,7 +141,7 @@ class ViewPage(tk.Frame):
         '''Select log to display'''
 
         # get data dataFrame
-        df = self.master.model.fetch_data(hole)
+        df = self.master.model.db_fetch(hole)
         if not df.empty:
             xs,ys = df.x.values, df.y.values
 
@@ -268,18 +269,32 @@ class Model(object):
         self.bhs = json.load(open('holes.json', 'r'))
         self.data = pd.DataFrame(columns=['x', 'y'])
 
-    def fetch_data(self, bh):
+    # def fetch_data(self, bh):
 
-        '''Fetch data from "database"'''
+        # '''Fetch data from "database"'''
 
-        try:
-            df = pd.read_json('./db/{}.json'.format(bh), orient='columns')
-        except ValueError:
-            print('Data could not be loaded from db')
-        else:
-            self.data.x = df.x.values
-            self.data.y = df.y.values
-            return self.data
+        # try:
+            # df = pd.read_json('./db/{}.json'.format(bh), orient='columns')
+        # except ValueError:
+            # print('Data could not be loaded from db')
+        # else:
+            # self.data.x = df.x.values
+            # self.data.y = df.y.values
+            # return self.data
+            
+    def db_fetch(self, bh):
+
+        '''Fetch data from sqlite database'''
+
+        data = {}
+        with dbConnect('./example.db') as c:
+
+            tables = c.execute(dbConnect.qry_tables).fetchall()
+            for table, in tables:
+                data[table] = c.execute(dbConnect.qry_data.replace('?', table)).fetchall()
+
+        self.data.x, self.data.y = zip(*data['tbl_pspr'])
+        return self.data
 
 
 # main
