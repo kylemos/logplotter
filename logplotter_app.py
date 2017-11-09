@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from __future__ import print_function
 import Tkinter as tk
-# import ttk as ttk
+import ttk as ttk
 from tkColorChooser import askcolor
 from tkFileDialog import asksaveasfilename
 
@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from functools import partial
-# import json # temporary in place of db
+import json # temporary in place of db
 import pandas as pd
 from logplotter_sql import dbConnect
 
@@ -25,7 +25,6 @@ TODO:
  * Use matplotlib's 'set_data' method to update graph (i.e. instead of cla(), draw())?
  * Fix save_as_image method, see https://tkinter.unpythonic.net/wiki/tkFileDialog
  * Use caching to store recently-loaded logs (to avoid excessive db fetches).
- * Add scrollbar
  * Add legend on second page (linked to figure properties, which should be part of model?)
  * Implement application-level logging (using logging)
 """
@@ -48,7 +47,7 @@ class LogPlotterApp(tk.Tk):
         tk.Tk.__init__(self)
 
         # set up model
-        self.model = Model()
+        self.model = Model(self)
 
         # set up container frame
         container = tk.Frame(self)
@@ -118,6 +117,14 @@ class ViewPage(tk.Frame):
             self.columnconfigure(i, weight=1)
         self.rowconfigure(0, weight=1)
 
+        # add pager buttons, label
+        self.pgLabel = tk.Label(self, anchor='e', textvariable=self.master.model.page)
+        self.pgLabel.grid(row=1, column=2)
+        self.pgupButton = ttk.Button(self, text=u'\u21E7', command=self.pg_up)
+        self.pgdnButton = ttk.Button(self, text=u'\u21E9', command=self.pg_dn, state='disabled')
+        self.pgupButton.grid(row=1, column=3)
+        self.pgdnButton.grid(row=1, column=1)
+
         # add depth tracker label
         self.depthVar = tk.StringVar()
         self.depthLabel = tk.Label(self, relief='groove', anchor='w', textvariable=self.depthVar)
@@ -128,7 +135,7 @@ class ViewPage(tk.Frame):
     def save_as_image(self):
 
         '''Save figure as image'''
-        
+
         filetypes = [('Portable Network Graphics','*.png'),
                      ('JPEG','*.jpg'),
                      ('Adobe Portable Document Format','*.pdf')]
@@ -168,14 +175,36 @@ class ViewPage(tk.Frame):
         self.visible[i] = not self.visible[i]
 
     def on_move_event(self, event):
-    
+
         '''Track depth by mouse position'''
-        
+
         c = self.canvases[0]
         f, ax = c.figure, c.ax_log
         top = ax.get_position().y1 * f.get_size_inches()[1] * f.dpi
         if event.inaxes and event.y < top:
             self.depthVar.set('mD: {:.2f} m'.format(event.ydata))
+
+    def pg_up(self):
+
+        '''Increase page number'''
+
+        pgnum = self.master.model.page.get()
+        if pgnum == self.master.model.pagemax - 1:
+            self.pgupButton.configure(state='disabled')
+        elif pgnum == 1:
+            self.pgdnButton.configure(state='normal')
+        self.master.model.pg_up()
+
+    def pg_dn(self):
+
+        '''Decrease page number'''
+
+        pgnum = self.master.model.page.get()
+        if pgnum == self.master.model.pagemax:
+            self.pgupButton.configure(state='normal')
+        elif pgnum <= 2:
+            self.pgdnButton.configure(state='disabled')
+        self.master.model.pg_dn()
 
 
 class MenuBar(tk.Menu):
@@ -183,7 +212,7 @@ class MenuBar(tk.Menu):
     '''Menu bar class (for better modularisation)'''
 
     def __init__(self, parent):
-    
+
         '''Initialiser'''
 
         tk.Menu.__init__(self, parent)
@@ -248,6 +277,7 @@ class LogPanel(FigureCanvasTkAgg):
     
         self.ax_log.cla()
         self.ax_log.plot(ys, xs, 'r')
+        # self.ax_log.set_ydata
         self.draw()
         
     def set_facecolor(self, color):
@@ -262,25 +292,16 @@ class Model(object):
 
     '''Data model'''
 
-    def __init__(self):
+    def __init__(self, parent):
 
         '''Initialiser'''
 
+        self.parent = parent
         self.bhs = json.load(open('holes.json', 'r'))
         self.data = pd.DataFrame(columns=['x', 'y'])
-
-    # def fetch_data(self, bh):
-
-        # '''Fetch data from "database"'''
-
-        # try:
-            # df = pd.read_json('./db/{}.json'.format(bh), orient='columns')
-        # except ValueError:
-            # print('Data could not be loaded from db')
-        # else:
-            # self.data.x = df.x.values
-            # self.data.y = df.y.values
-            # return self.data
+        self.page = tk.IntVar()
+        self.page.set(1)
+        self.pagemax = 10
             
     def db_fetch(self, bh):
 
@@ -295,6 +316,20 @@ class Model(object):
 
         self.data.x, self.data.y = zip(*data['tbl_pspr'])
         return self.data
+        
+    def pg_up(self):
+
+        '''Page up'''
+
+        if not self.page.get() == self.pagemax:
+            self.page.set(self.page.get() + 1)
+
+    def pg_dn(self):
+
+        '''Page down'''
+
+        if not self.page.get() == 1:
+            self.page.set(self.page.get() - 1)
 
 
 # main
