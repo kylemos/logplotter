@@ -22,17 +22,17 @@ style.use('bmh')
 """
 TODO:
  * Maintain MVC design pattern
+ * Create different panels, inheriting from LogPanel and stored in separate 'panels' module?
  * Use matplotlib's 'set_data' method to update graph (i.e. instead of cla(), draw())?
  * Fix save_as_image method, see https://tkinter.unpythonic.net/wiki/tkFileDialog
  * Use caching to store recently-loaded logs (to avoid excessive db fetches).
- * Add legend on second page (linked to figure properties, which should be part of model?)
+ * Add legend on second page (linked to figure properties, which should be separate class?)
  * Implement application-level logging (using logging)
 """
 
 # Structure:   https://stackoverflow.com/questions/17466561/best-way-to-structure-a-tkinter-application
 # REFERENCE:   http://www.tcl.tk/man/tcl8.5/TkCmd/contents.htm
 # Caching:     https://www.blog.pythonlibrary.org/2016/02/25/python-an-intro-to-caching/
-# Also useful: https://stackoverflow.com/questions/8707039/difference-between-pack-and-configure-for-widgets-in-tkinter
 #              http://effbot.org/tkinterbook/canvas.htm
 
 
@@ -113,22 +113,22 @@ class ViewPage(tk.Frame):
         # grid and configure log panels
         for i, c in enumerate(self.canvases):
             c.show()
-            c.get_tk_widget().grid(row=0, column=i, sticky='nsew')
-            self.columnconfigure(i, weight=1)
+            c.get_tk_widget().grid(row=0, column=i+1, sticky='nsew', rowspan=6)
+            self.columnconfigure(i+1, weight=1)
         self.rowconfigure(0, weight=1)
 
         # add pager buttons, label
         self.pgLabel = tk.Label(self, anchor='e', textvariable=self.master.model.page)
-        self.pgLabel.grid(row=1, column=2)
-        self.pgupButton = ttk.Button(self, text=u'\u21E7', command=self.pg_up)
-        self.pgdnButton = ttk.Button(self, text=u'\u21E9', command=self.pg_dn, state='disabled')
-        self.pgupButton.grid(row=1, column=3)
-        self.pgdnButton.grid(row=1, column=1)
+        self.pgLabel.grid(row=1, column=0)
+        self.pgupButton = ControlButton(self, text=u'\u21E7', command=self.pg_up, width=45, height=45)
+        self.pgdnButton = ControlButton(self, text=u'\u21E9', command=self.pg_dn, width=45, height=45, state='disabled')
+        self.pgupButton.grid(row=0, column=0)
+        self.pgdnButton.grid(row=2, column=0)
 
         # add depth tracker label
         self.depthVar = tk.StringVar()
         self.depthLabel = tk.Label(self, relief='groove', anchor='w', textvariable=self.depthVar)
-        self.depthLabel.grid(row=1, column=0, sticky='nsew')
+        self.depthLabel.grid(row=6, column=1, sticky='nsew')
         for c in self.canvases:
             c.mpl_connect('motion_notify_event', self.on_move_event)
 
@@ -186,24 +186,24 @@ class ViewPage(tk.Frame):
 
     def pg_up(self):
 
-        '''Increase page number'''
+        '''Increment page, update pager buttons'''
 
         pgnum = self.master.model.page.get()
-        if pgnum == self.master.model.pagemax - 1:
-            self.pgupButton.configure(state='disabled')
-        elif pgnum == 1:
-            self.pgdnButton.configure(state='normal')
+        if pgnum == self.master.model.pagemax - 1 and self.pgupButton.state == 'normal':
+            self.pgupButton.state = 'disabled'
+        elif pgnum == 1 and self.pgdnButton.state == 'disabled':
+            self.pgdnButton.state = 'normal'
         self.master.model.pg_up()
 
     def pg_dn(self):
 
-        '''Decrease page number'''
+        '''Decrement page, update pager buttons'''
 
         pgnum = self.master.model.page.get()
-        if pgnum == self.master.model.pagemax:
-            self.pgupButton.configure(state='normal')
-        elif pgnum <= 2:
-            self.pgdnButton.configure(state='disabled')
+        if pgnum == self.master.model.pagemax and self.pgupButton.state == 'disabled':
+            self.pgupButton.state = 'normal'
+        elif pgnum <= 2 and self.pgdnButton.state == 'normal':
+            self.pgdnButton.state = 'disabled'
         self.master.model.pg_dn()
 
 
@@ -250,7 +250,7 @@ class LogPanel(FigureCanvasTkAgg):
     '''Log panel class'''
 
     def __init__(self, parent):
-    
+
         '''Initialiser'''
 
         # set up figure, axes
@@ -270,14 +270,16 @@ class LogPanel(FigureCanvasTkAgg):
         plt.setp(self.ax_hdr, yticks=[])
         plt.setp(self.ax_hdr.get_xticklines(), visible=False)
         self.fig.subplots_adjust(left=.08, right=.92, bottom=.04, top=.98, hspace=.02)
-        
+
     def plot_data(self, xs, ys):
     
         '''Plot x/y data on log axes'''
     
-        self.ax_log.cla()
-        self.ax_log.plot(ys, xs, 'r')
-        # self.ax_log.set_ydata
+        if self.ax_log.get_lines():
+            self.ax_log.lines[0].set_ydata(ys)
+        else:
+            # self.ax_log.cla()
+            self.ax_log.plot(ys, xs, 'r')
         self.draw()
         
     def set_facecolor(self, color):
@@ -332,7 +334,34 @@ class Model(object):
             self.page.set(self.page.get() - 1)
 
 
-# main
+class ControlButton(ttk.Frame, object):
+
+    '''Implementation of ttk.Button with size adjustment & state property'''
+
+    def __init__(self, parent, height=None, width=None, text='', command=None, state='normal'):
+
+        self._state = state
+        ttk.Frame.__init__(self, parent, height=height, width=width)
+        self.pack_propagate(0)
+        s = ttk.Style()
+        s.configure('CButton.TButton', font=('Helvetica, 26'))
+        self._btn = ttk.Button(self, text=text, command=command, 
+                               state=state, style='CButton.TButton')
+        self._btn.pack(fill=tk.BOTH, expand=1)
+
+    @property
+    def state(self):
+
+        return self._state
+
+    @state.setter
+    def state(self, state):
+
+        self._btn.configure(state=state)
+        self._state = state
+
+
+# main loop
 if __name__ == '__main__':
 
     root = LogPlotterApp()
