@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from __future__ import print_function
+from __future__ import print_function, division
 import Tkinter as tk
 import ttk as ttk
 from tkColorChooser import askcolor
@@ -118,7 +118,7 @@ class ViewPage(tk.Frame):
         self.rowconfigure(0, weight=1)
 
         # add pager buttons, label
-        self.pgLabel = tk.Label(self, anchor='e', textvariable=self.master.model.page)
+        self.pgLabel = tk.Label(self, anchor='e', textvariable=self.master.model._page)
         self.pgLabel.grid(row=1, column=0)
         self.pgupButton = ControlButton(self, text=u'\u21E7', command=self.pg_up, width=45, height=45)
         self.pgdnButton = ControlButton(self, text=u'\u21E9', command=self.pg_dn, width=45, height=45, state='disabled')
@@ -143,12 +143,12 @@ class ViewPage(tk.Frame):
         if savename:
             self.fig.savefig(savename, dpi=150)
 
-    def display_log(self, hole):
+    def display_log(self, bh, page=1):
 
         '''Select log to display'''
 
         # get data dataFrame
-        df = self.master.model.db_fetch(hole)
+        df = self.master.model.get_data(bh, page)
         if not df.empty:
             xs,ys = df.x.values, df.y.values
 
@@ -188,23 +188,45 @@ class ViewPage(tk.Frame):
 
         '''Increment page, update pager buttons'''
 
-        pgnum = self.master.model.page.get()
+        # skip in no bh loaded
+        if not self.master.model.current_bh:
+            return
+
+        # get page number
+        pgnum = self.master.model.page
+        
+        # update buttons, page number
         if pgnum == self.master.model.pagemax - 1 and self.pgupButton.state == 'normal':
             self.pgupButton.state = 'disabled'
         elif pgnum == 1 and self.pgdnButton.state == 'disabled':
             self.pgdnButton.state = 'normal'
         self.master.model.pg_up()
+        
+        # update data
+        self.display_log(self.master.model.current_bh,
+                         self.master.model.page)
 
     def pg_dn(self):
 
         '''Decrement page, update pager buttons'''
 
-        pgnum = self.master.model.page.get()
+        # skip in no bh loaded
+        if not self.master.model.current_bh:
+            return
+
+        # get page number
+        pgnum = self.master.model.page
+
+        # update buttons, page number
         if pgnum == self.master.model.pagemax and self.pgupButton.state == 'disabled':
             self.pgupButton.state = 'normal'
         elif pgnum <= 2 and self.pgdnButton.state == 'normal':
             self.pgdnButton.state = 'disabled'
         self.master.model.pg_dn()
+
+        # update data
+        self.display_log(self.master.model.current_bh,
+                         self.master.model.page)
 
 
 class MenuBar(tk.Menu):
@@ -272,18 +294,18 @@ class LogPanel(FigureCanvasTkAgg):
         self.fig.subplots_adjust(left=.08, right=.92, bottom=.04, top=.98, hspace=.02)
 
     def plot_data(self, xs, ys):
-    
+
         '''Plot x/y data on log axes'''
-    
-        if self.ax_log.get_lines():
-            self.ax_log.lines[0].set_ydata(ys)
-        else:
-            # self.ax_log.cla()
-            self.ax_log.plot(ys, xs, 'r')
+
+        # if self.ax_log.get_lines():
+            # self.ax_log.lines[0].set_ydata(ys)
+        # else:
+        self.ax_log.cla()
+        self.ax_log.plot(ys, xs, 'r')
         self.draw()
-        
+
     def set_facecolor(self, color):
-    
+
         '''Set figure background colour'''
 
         self.fig.set_facecolor(color[1])
@@ -294,6 +316,14 @@ class Model(object):
 
     '''Data model'''
 
+    @property
+    def page(self):
+        return self._page.get()
+
+    @page.setter
+    def page(self, num):
+        self._page.set(num)
+
     def __init__(self, parent):
 
         '''Initialiser'''
@@ -301,44 +331,73 @@ class Model(object):
         self.parent = parent
         self.bhs = json.load(open('holes.json', 'r'))
         self.data = pd.DataFrame(columns=['x', 'y'])
-        self.page = tk.IntVar()
-        self.page.set(1)
-        self.pagemax = 10
-            
+        self.current_bh = None
+        self._page = tk.IntVar()
+        self.page = 1
+        self.pagemax = 1
+
     def db_fetch(self, bh):
 
         '''Fetch data from sqlite database'''
 
+        # fetch data
         data = {}
         with dbConnect('./example.db') as c:
-
             tables = c.execute(dbConnect.qry_tables).fetchall()
             for table, in tables:
                 data[table] = c.execute(dbConnect.qry_data.replace('?', table)).fetchall()
 
+        # set data, current bh, max pages
         self.data.x, self.data.y = zip(*data['tbl_pspr'])
-        return self.data
-        
+        self.current_bh = bh
+        self.pagemax = (self.data.x.max() // 100) + 1
+
+    def get_data(self, bh, page):
+
+        '''Return data for plotting (page 1 by default)'''
+
+        # reload model if necessary
+        if not bh == self.current_bh:
+            # TODO: check if cache contains bh
+            # (or put this in db_fetch method???)
+            self.db_fetch(bh)
+
+        # return specified page
+        xmin, xmax = (page - 1)*100, page*100
+        return self.data[(self.data['x'] >= xmin) &
+                         (self.data['x'] < xmax)]
+
     def pg_up(self):
 
         '''Page up'''
 
-        if not self.page.get() == self.pagemax:
-            self.page.set(self.page.get() + 1)
+        if not self.page == self.pagemax:
+            self.page += 1
 
     def pg_dn(self):
 
         '''Page down'''
 
-        if not self.page.get() == 1:
-            self.page.set(self.page.get() - 1)
+        if not self.page == 1:
+            self.page -= 1
 
 
 class ControlButton(ttk.Frame, object):
 
     '''Implementation of ttk.Button with size adjustment & state property'''
 
+    @property
+    def state(self):
+        return self._state
+
+    @state.setter
+    def state(self, state):
+        self._btn.configure(state=state)
+        self._state = state
+
     def __init__(self, parent, height=None, width=None, text='', command=None, state='normal'):
+
+        '''Initialiser'''
 
         self._state = state
         ttk.Frame.__init__(self, parent, height=height, width=width)
@@ -348,17 +407,6 @@ class ControlButton(ttk.Frame, object):
         self._btn = ttk.Button(self, text=text, command=command, 
                                state=state, style='CButton.TButton')
         self._btn.pack(fill=tk.BOTH, expand=1)
-
-    @property
-    def state(self):
-
-        return self._state
-
-    @state.setter
-    def state(self, state):
-
-        self._btn.configure(state=state)
-        self._state = state
 
 
 # main loop

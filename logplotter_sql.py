@@ -4,7 +4,7 @@ class dbConnect:
     
     '''Implements read-only db connection as context manager'''
     
-    # queries
+    # class variables: queries
     qry_tables = "SELECT name FROM sqlite_master WHERE type='table';"
     qry_data = "SELECT * FROM ?;"
 
