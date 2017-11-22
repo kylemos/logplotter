@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 from __future__ import print_function, division
 import Tkinter as tk
 import ttk as ttk
@@ -15,19 +14,22 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from functools import partial
 import json # temporary in place of db
 import pandas as pd
+import io
+from PIL import Image
+
 from logplotter_sql import dbConnect
+from panels import LogPanel, LithoPanel
 
 style.use('bmh')
 
 """
 TODO:
- * Maintain MVC design pattern
- * Create different panels, inheriting from LogPanel and stored in separate 'panels' module?
- * Use matplotlib's 'set_data' method to update graph (i.e. instead of cla(), draw())?
- * Fix save_as_image method, see https://tkinter.unpythonic.net/wiki/tkFileDialog
- * Use caching to store recently-loaded logs (to avoid excessive db fetches).
- * Add legend on second page (linked to figure properties, which should be separate class?)
- * Implement application-level logging (using logging)
+* Maintain MVC design pattern
+* Use matplotlib's 'set_data' method to update graph (i.e. instead of cla(), draw())?
+* Fix save_as_image method, see https://tkinter.unpythonic.net/wiki/tkFileDialog
+* Use caching to store recently-loaded logs (to avoid excessive db fetches).
+* Add legend on second page (linked to figure properties, which should be class in separate module)
+* Implement application-level logging (using logging)
 """
 
 # Structure:   https://stackoverflow.com/questions/17466561/best-way-to-structure-a-tkinter-application
@@ -105,7 +107,7 @@ class ViewPage(tk.Frame):
         self.master.config(menu=menu)
 
         # set up log panels
-        self.c1 = LogPanel(self)
+        self.c1 = LithoPanel(self)
         self.c2 = LogPanel(self)
         self.c3 = LogPanel(self)
         self.canvases = [self.c1, self.c2, self.c3]
@@ -136,25 +138,41 @@ class ViewPage(tk.Frame):
 
         '''Save figure as image'''
 
-        filetypes = [('Portable Network Graphics','*.png'),
-                     ('JPEG','*.jpg'),
-                     ('Adobe Portable Document Format','*.pdf')]
+        # get desired filetype from user
+        filetypes = [('Portable Network Graphics', '*.png'),
+                     ('JPEG', '*.jpg'),
+                     ('Adobe Portable Document Format', '*.pdf')]
         savename = asksaveasfilename(defaultextension='.png', filetypes=filetypes)
+
+        # combine figures
         if savename:
-            self.fig.savefig(savename, dpi=150)
+            figures = [c.save_image() for c in self.canvases]
+            width  = sum([f.size[1] for f in figures])
+            height = max([f.size[0] for f in figures])
+            image = Image.new('RGBA', (width, height))
+            x_offset = 0
+            for f in figures:
+                image.paste(f, (x_offset, 0))
+                x_offset += f.size[0]
+
+        # save to file
+        image.save(savename)
 
     def display_log(self, bh, page=1):
 
         '''Select log to display'''
 
         # get data dataFrame
-        df = self.master.model.get_data(bh, page)
+        df, lith = self.master.model.get_data(bh, page)
         if not df.empty:
             xs,ys = df.x.values, df.y.values
 
         # redraw
         for c in self.canvases:
-            c.plot_data(xs, ys)
+            if isinstance(c, LithoPanel):
+                c.plot_data(lith)
+            else:
+                c.plot_data(xs, ys)
 
     def change_background(self):
 
@@ -194,14 +212,14 @@ class ViewPage(tk.Frame):
 
         # get page number
         pgnum = self.master.model.page
-        
+
         # update buttons, page number
         if pgnum == self.master.model.pagemax - 1 and self.pgupButton.state == 'normal':
             self.pgupButton.state = 'disabled'
         elif pgnum == 1 and self.pgdnButton.state == 'disabled':
             self.pgdnButton.state = 'normal'
         self.master.model.pg_up()
-        
+
         # update data
         self.display_log(self.master.model.current_bh,
                          self.master.model.page)
@@ -231,7 +249,7 @@ class ViewPage(tk.Frame):
 
 class MenuBar(tk.Menu):
 
-    '''Menu bar class (for better modularisation)'''
+    '''Menu bar class'''
 
     def __init__(self, parent):
 
@@ -267,51 +285,6 @@ class MenuBar(tk.Menu):
         self.add_cascade(label="View", menu=viewMenu)
 
 
-class LogPanel(FigureCanvasTkAgg):
-
-    '''Log panel class'''
-
-    def __init__(self, parent):
-
-        '''Initialiser'''
-
-        # set up figure, axes
-        self.parent = parent
-        self.fig, self.axes = plt.subplots(nrows=2, sharex=True, figsize=(1, 4),
-                                           gridspec_kw={'height_ratios': [1, 12]})
-        self.ax_hdr, self.ax_log = self.axes
-        FigureCanvasTkAgg.__init__(self, self.fig, self.parent)
-
-        # format axes
-        self.fig.set_facecolor('w')
-        for ax in self.axes:
-            ax.patch.set_facecolor('w')
-            ax.yaxis.set_ticklabels([])
-            ax.tick_params(labelsize=8)
-        self.ax_hdr.grid(False)
-        plt.setp(self.ax_hdr, yticks=[])
-        plt.setp(self.ax_hdr.get_xticklines(), visible=False)
-        self.fig.subplots_adjust(left=.08, right=.92, bottom=.04, top=.98, hspace=.02)
-
-    def plot_data(self, xs, ys):
-
-        '''Plot x/y data on log axes'''
-
-        # if self.ax_log.get_lines():
-            # self.ax_log.lines[0].set_ydata(ys)
-        # else:
-        self.ax_log.cla()
-        self.ax_log.plot(ys, xs, 'r')
-        self.draw()
-
-    def set_facecolor(self, color):
-
-        '''Set figure background colour'''
-
-        self.fig.set_facecolor(color[1])
-        self.draw()
-
-
 class Model(object):
 
     '''Data model'''
@@ -335,6 +308,9 @@ class Model(object):
         self._page = tk.IntVar()
         self.page = 1
         self.pagemax = 1
+        
+        # TEMP: litho dataframe
+        self.lith = pd.DataFrame(columns=['end','start','lithname'])
 
     def db_fetch(self, bh):
 
@@ -351,6 +327,9 @@ class Model(object):
         self.data.x, self.data.y = zip(*data['tbl_pspr'])
         self.current_bh = bh
         self.pagemax = (self.data.x.max() // 100) + 1
+        
+        # TEMP: set self.lith to store lithology info
+        self.lith.end, self.lith.start, self.lith.lithname = zip(*data['tbl_lith'])
 
     def get_data(self, bh, page):
 
@@ -359,13 +338,12 @@ class Model(object):
         # reload model if necessary
         if not bh == self.current_bh:
             # TODO: check if cache contains bh
-            # (or put this in db_fetch method???)
             self.db_fetch(bh)
 
         # return specified page
-        xmin, xmax = (page - 1)*100, page*100
-        return self.data[(self.data['x'] >= xmin) &
-                         (self.data['x'] < xmax)]
+        ymin, ymax = (page - 1)*100, page*100
+        return (self.data[(self.data['x'] >= ymin) & (self.data['x'] < ymax)],
+                self.lith[(self.lith['start'] >= ymin) & (self.lith['end'] < ymax)])
 
     def pg_up(self):
 
